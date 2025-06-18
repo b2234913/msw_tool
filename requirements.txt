@@ -1,0 +1,10 @@
+keyboard
+PyAutoIt
+pillow
+python-imagesearch
+easyocr
+pyinstaller
+requests
+pytesseract
+pygetwindow
+pywin32
