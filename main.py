@@ -10,9 +10,13 @@ import sys
 import threading
 import tkinter as tk
 from tkinter import ttk
+import json
+import os
 
 # 設定 tesseract 執行檔路徑（請依實際安裝路徑修改）
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
+CONFIG_PATH = "config.json"
 
 
 def find_image_on_screen(template_path, threshold=0.8, screenshot_img=None):
@@ -219,6 +223,11 @@ class AutoPotionApp:
         self.buff_interval = tk.IntVar(value=200)
         self.buff_countdown = tk.IntVar(value=self.buff_interval.get())
 
+        self.config_path = CONFIG_PATH
+
+        # 載入 config
+        self.load_config()
+
         self.root.after(self.focus_check_interval, self.check_focus_and_toggle)
 
         ttk.Label(root, text="HP 閾值:").grid(row=0, column=0, sticky="e")
@@ -324,14 +333,67 @@ class AutoPotionApp:
             self.status_var.set(f"視窗偵測錯誤: {e}")
         self.root.after(self.focus_check_interval, self.check_focus_and_toggle)
 
+    def save_config(self):
+        config = {
+            "hp_threshold": self.hp_threshold.get(),
+            "mp_threshold": self.mp_threshold.get(),
+            "hp_key": self.hp_key.get(),
+            "mp_key": self.mp_key.get(),
+            "buff_interval": self.buff_interval.get(),
+            "insert_keys": [v.get() for v in self.insert_keys]
+        }
+        try:
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"儲存 config 失敗: {e}")
+
+    def load_config(self):
+        if not os.path.exists(self.config_path):
+            return
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            self.hp_threshold.set(config.get("hp_threshold", 150))
+            self.mp_threshold.set(config.get("mp_threshold", 20))
+            self.hp_key.set(config.get("hp_key", "end"))
+            self.mp_key.set(config.get("mp_key", "delete"))
+            self.buff_interval.set(config.get("buff_interval", 200))
+            insert_keys = config.get("insert_keys", ["1"])
+            # 先清空現有 insert_keys
+            self.insert_keys.clear()
+            for entry in getattr(self, "insert_key_entries", []):
+                entry.destroy()
+            self.insert_key_entries = []
+            for i, key in enumerate(insert_keys):
+                var = tk.StringVar(value=key)
+                self.insert_keys.append(var)
+                entry = ttk.Entry(self.root, textvariable=var, width=8)
+                entry.grid(row=2+i, column=3)
+                entry.bind("<Button-1>", lambda e, idx=i: self.wait_for_key("insert", idx))
+                self.insert_key_entries.append(entry)
+            # 重新放置Buff間隔欄位
+            idx = len(self.insert_keys) - 1
+            for widget in self.root.grid_slaves(row=3+idx, column=2):
+                widget.grid_forget()
+            for widget in self.root.grid_slaves(row=3+idx, column=3):
+                widget.grid_forget()
+            ttk.Label(self.root, text="Buff間隔(秒):").grid(row=3+idx, column=2, sticky="e")
+            ttk.Entry(self.root, textvariable=self.buff_interval, width=8).grid(row=3+idx, column=3)
+            ttk.Label(self.root, text="Buff倒數:").grid(row=4+idx, column=2, sticky="e")
+            self.buff_countdown_label = ttk.Label(self.root, textvariable=self.buff_countdown)
+            self.buff_countdown_label.grid(row=4+idx, column=3)
+        except Exception as e:
+            print(f"載入 config 失敗: {e}")
+
     def start(self):
         if not self.running:
+            self.save_config()  # 啟動時自動儲存設定
             self.running = True
             self.stop_event.clear()
             self.status_var.set("狀態: 執行中")
             self.start_btn.config(state="disabled")
             self.pause_btn.config(state="normal")
-            # 只在 start 時設置倒數，不在 auto_insert_loop 內重設
             self.buff_countdown.set(self.buff_interval.get())
             self._buff_timer_running = True
             self.root.after(1000, self.update_buff_countdown)
@@ -346,6 +408,7 @@ class AutoPotionApp:
             self.auto_insert_thread.start()
 
     def pause(self):
+        self.save_config()  # 暫停時也自動儲存設定
         self.running = False
         self.stop_event.set()
         self.status_var.set("狀態: 暫停")
