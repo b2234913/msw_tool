@@ -251,7 +251,7 @@ class AutoPotionApp:
         for i, key_var in enumerate(self.insert_keys):
             entry = ttk.Entry(root, textvariable=key_var, width=8)
             entry.grid(row=2+i, column=3)
-            entry.bind("<Button-1>", lambda e, idx=i: self.wait_for_key("insert", idx))
+            # <Button-1> 綁定移除，讓使用者直接輸入
             self.insert_key_entries.append(entry)
         self.add_buff_btn = ttk.Button(root, text="新增Buff鍵", command=self.add_buff_key)
         self.add_buff_btn.grid(row=2+len(self.insert_keys), column=3, sticky="ew")
@@ -279,7 +279,7 @@ class AutoPotionApp:
         self.insert_keys.append(new_var)
         entry = ttk.Entry(self.root, textvariable=new_var, width=8)
         entry.grid(row=2+idx, column=3)
-        entry.bind("<Button-1>", lambda e, idx=idx: self.wait_for_key("insert", idx))
+        # <Button-1> 綁定移除，讓使用者直接輸入
         self.insert_key_entries.append(entry)
         # 重新放置Buff間隔欄位
         for widget in self.root.grid_slaves(row=3+idx-1, column=2):
