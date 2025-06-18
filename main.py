@@ -151,8 +151,7 @@ def check_buff_status(buff_region, win_left, win_top, screenshot_img, buff_templ
     return found
 
 
-def auto_insert_loop(get_keys_func, stop_event, running_func, interval_sec_func):
-    # 等待主線程啟動與GUI初始化
+def auto_insert_loop(get_keys_func, stop_event, running_func, interval_sec_func, countdown_var, timer_running_func):
     while not running_func():
         if stop_event.is_set():
             return
@@ -161,10 +160,10 @@ def auto_insert_loop(get_keys_func, stop_event, running_func, interval_sec_func)
     while running_func() and not stop_event.is_set():
         if first:
             first = False
-            time.sleep(0.3)  # 確保第一次進入時有短暫延遲
+            time.sleep(0.3)
         else:
             interval = max(1, interval_sec_func())
-            for _ in range(int(interval * 10)):  # 每0.1秒檢查一次
+            for _ in range(int(interval * 10)):
                 if not running_func() or stop_event.is_set():
                     return
                 time.sleep(0.1)
@@ -178,7 +177,20 @@ def auto_insert_loop(get_keys_func, stop_event, running_func, interval_sec_func)
                 pyautogui.keyUp(key)
             except Exception as e:
                 print(f"自動按鍵 {key} 發生錯誤: {e}")
-            time.sleep(1)  # 每個按鍵之間稍作延遲
+            time.sleep(1)
+        # Buff倒數重設，僅在非第一次循環且 countdown 為 0 時才重設
+        if timer_running_func():
+            # 只有 countdown 已經為 0 時才重設
+            if countdown_var.get() == 0:
+                import tkinter
+
+                def set_countdown():
+                    countdown_var.set(interval_sec_func())
+                try:
+                    root = countdown_var._master
+                    root.after(0, set_countdown)
+                except Exception:
+                    countdown_var.set(interval_sec_func())
 
 
 class AutoPotionApp:
@@ -202,9 +214,10 @@ class AutoPotionApp:
         self._waiting_key = None  # 用於記錄目前等待哪個按鍵
         self._waiting_key_idx = None  # 新增：記錄等待哪個buff鍵
 
-        self.insert_keys = [tk.StringVar(value="1,2")]  # 預設多個buff鍵用逗號分隔
+        self.insert_keys = [tk.StringVar(value="1")]  # 預設多個buff鍵用逗號分隔
 
         self.buff_interval = tk.IntVar(value=200)
+        self.buff_countdown = tk.IntVar(value=self.buff_interval.get())
 
         self.root.after(self.focus_check_interval, self.check_focus_and_toggle)
 
@@ -236,6 +249,9 @@ class AutoPotionApp:
 
         ttk.Label(root, text="Buff間隔(秒):").grid(row=3+len(self.insert_keys)-1, column=2, sticky="e")
         ttk.Entry(root, textvariable=self.buff_interval, width=8).grid(row=3+len(self.insert_keys)-1, column=3)
+        ttk.Label(root, text="Buff倒數:").grid(row=4+len(self.insert_keys)-1, column=2, sticky="e")
+        self.buff_countdown_label = ttk.Label(root, textvariable=self.buff_countdown)
+        self.buff_countdown_label.grid(row=4+len(self.insert_keys)-1, column=3)
 
         self.start_btn = ttk.Button(root, text="開始", command=self.start)
         self.start_btn.grid(row=2, column=0, pady=5)
@@ -245,6 +261,8 @@ class AutoPotionApp:
 
         # 綁定全域按鍵事件
         self.root.bind("<Key>", self.on_key_press)
+
+        self._buff_timer_running = False
 
     def add_buff_key(self):
         idx = len(self.insert_keys)
@@ -313,12 +331,16 @@ class AutoPotionApp:
             self.status_var.set("狀態: 執行中")
             self.start_btn.config(state="disabled")
             self.pause_btn.config(state="normal")
+            # 只在 start 時設置倒數，不在 auto_insert_loop 內重設
+            self.buff_countdown.set(self.buff_interval.get())
+            self._buff_timer_running = True
+            self.root.after(1000, self.update_buff_countdown)
             self.thread = threading.Thread(target=self.worker, daemon=True)
             self.thread.start()
             self.auto_insert_thread = threading.Thread(
                 target=auto_insert_loop,
                 args=(self.get_all_buff_keys, self.stop_event,
-                      lambda: self.running, lambda: self.buff_interval.get()),
+                      lambda: self.running, lambda: self.buff_interval.get(), self.buff_countdown, lambda: self._buff_timer_running),
                 daemon=True
             )
             self.auto_insert_thread.start()
@@ -329,6 +351,17 @@ class AutoPotionApp:
         self.status_var.set("狀態: 暫停")
         self.start_btn.config(state="normal")
         self.pause_btn.config(state="disabled")
+        self._buff_timer_running = False
+
+    def update_buff_countdown(self):
+        if not self._buff_timer_running:
+            return
+        val = self.buff_countdown.get()
+        if val > 0:
+            self.buff_countdown.set(val - 1)
+        # 無論倒數是否為0，都只排程一次，避免重複排程
+        if self._buff_timer_running:
+            self.root.after(1000, self.update_buff_countdown)
 
     def worker(self):
         window_title = "MapleStory Worlds"
@@ -381,28 +414,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# 打包成 exe 步驟（以 pyinstaller 為例）：
-
-# 1. 安裝 pyinstaller
-#    在命令提示字元(cmd)或PowerShell執行：
-#    pip install pyinstaller
-
-# 2. 進入 main.py 所在資料夾
-#    cd c:\Users\Shooter\test\msw
-
-# 3. 執行打包指令
-#    pyinstaller --noconsole --onefile main.py
-
-#    --noconsole 代表不顯示黑色命令視窗（GUI程式建議加上）
-#    --onefile   代表產生單一 main.exe 檔案
-
-# 4. 執行檔會在 dist\main.exe
-#    請將 tesseract.exe 及相關圖片等資源一併放到同資料夾或設定好路徑
-
-# 5. 若有額外資源（如 buff.png），可用 --add-data 參數：
-#    pyinstaller --noconsole --onefile --add-data "buff.png;." main.py
-
-# 6. 若遇到字型、OCR等問題，請確認 tesseract 路徑正確，或將 tesseract 安裝目錄加入 PATH。
-
-# 參考官方文件：https://pyinstaller.org/en/stable/
